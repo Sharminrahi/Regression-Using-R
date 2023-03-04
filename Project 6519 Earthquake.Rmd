@@ -1,0 +1,405 @@
+---
+title: "Prediction of Earthquake Magnitude"
+author: "Sharmin Akhter"
+output:
+  
+  pdf_document: default
+  html_document: default
+  toc: true
+  theme: united
+date: "2022-11-30"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# 1. Introduction
+
+This project mainly purposed to predict earthquake magnitude based on earthquake depth by using Simple Linear Regression. Later I predict magnitude based on other variables. The data set give the locations of 1000 seismic events of MB > 4.0. The events occurred in a cube near Fiji since 1964. This is one of the Harvard PRIM-H project data sets. They in turn obtained it from Dr. John Woodhouse, Dept. of Geophysics, Harvard University.
+
+A data frame with 1000 observations on 5 variables.
+
+  + **Mag**: predictor: Richer Magnitude
+  
+  + **lat**: Numeric: Latitude of event
+  
+  + **long**: Numeric: Longitude
+  
+  + **depth**: Numeric: depth(km)
+  
+  + **Stations** Numeric: Number of stations reporting
+  
+## Simple linear Regression assumption.
+
+The Linear Regression Model is based on several assumptions which are listed below:-
+
+  + Linear relationship
+
+  + Multivariate normality
+
+  + No or little multicollinearity
+
+  + No auto-correlation
+
+  + Homoscedasticity
+
+
+  
+
+# 2. Preliminary Analysis - Data Structure, Summary and Exploratory Analysis
+
+# Import libraries
+
+```{r, width = 100, warning=FALSE, message=FALSE}
+library(tidyverse)
+library(ggthemes)
+library(ggrepel)
+library(dplyr)
+library(corrplot)
+library(MASS)
+library(olsrr)
+```
+
+# Importing Data
+
+```{r}
+data_quakes<- read.csv("dataset-45892.csv")
+head(data_quakes)
+attach(data_quakes)
+```
+
+
+# Relocate Predictor
+
+```{r}
+data_quakes <- data_quakes %>% relocate(mag,.after= stations)
+head(data_quakes)
+```
+
+
+# Dimension of Data
+
+```{r}
+dim(data_quakes)
+```
+
+# Scatterplot of the datasets
+
+```{r}
+pairs(data_quakes, main = "Fiji Earthquakes, N = 1000", cex.main = 1.2, pch = ".")
+```
+
+# Structure of the data
+
+```{r}
+#View(data_quakes)
+str(data_quakes) 
+sum(is.na(data_quakes))
+```
+
+From the structure we can see that the all variables values are numeric.
+
+# Now to get the inside idea we will look summary of the data
+
+```{r}
+summary(data_quakes)
+```
+
+# Check for relationship between mag and depth
+
+```{r}
+mean(data_quakes$mag[data_quakes$depth>median(data_quakes$depth)])
+mean(data_quakes$mag[data_quakes$depth<median(data_quakes$depth)])
+```
+
+# From the above mean we can see the there is an inverse relationship between an earthquake’s depth and its magnitude.
+
+# Now we look at the variables distribution:
+
+```{r}
+pred = par(mfrow = c(3,3))
+for ( i in 1:5 ) {
+  truehist(data_quakes[[i]], xlab = names(data_quakes)[i], col = 'lightgreen', main = paste("Average =", signif(mean(data_quakes[[i]]),3)))
+}
+#pred
+```
+
+## From the above distribution we can say that variable are asymmetric.
+
+
+# Next I will produce boxplot for each of the variables to see the outliers
+
+# For each variables, we consider observations that lie outside 1.5 * IQR as outliers.
+
+```{r}
+par(mfrow = c(2,3))
+for ( i in 1:5) {
+  boxplot(data_quakes[[i]])
+  mtext(names(data_quakes)[i], cex = 0.8, side = 1, line = 2)
+}
+```
+
+# Create a histogram to get better information which boxplot cann't provide
+
+```{r}
+par(mfrow = c(3, 2))
+plot(quakes$lat,main="Latitude")
+plot(quakes$long, main="Longitude")
+plot(quakes$depth, main="Depth")
+plot(quakes$mag, main="Magnitude")
+plot(quakes$stations, main="Stations")
+```
+
+
+
+# Correlation matrix
+
+```{r}
+cormat<- round(cor(data_quakes),2)
+cormat
+corrplot(cormat)
+```
+
+
+
+From the above correlation matrix we can say that mag has negative correlation with lattitude and depth, it has positive correlation with longitude and no correlation with stations.
+
+
+
+# Outlier detection
+
+```{r}
+outliers = c()
+for ( i in 1:5 ) {
+  stats = boxplot.stats(data_quakes[[i]])$stats
+  bottom_outlier_rows = which(data_quakes[[i]] < stats[1])
+  top_outlier_rows = which(data_quakes[[i]] > stats[5])
+ outliers = c(outliers , top_outlier_rows[ !top_outlier_rows %in% outliers] )
+  outliers = c(outliers , bottom_outlier_rows[ !bottom_outlier_rows %in% outliers] )
+}
+outliers
+```
+
+
+
+
+# We use the Cook’s distance to detect influential observations.
+
+```{r}
+mod = lm(mag ~ ., data = data_quakes)
+cooksd = cooks.distance(mod)
+plot(cooksd, pch = "*", cex = 2, main = "Influential Obs by Cooks distance")
+abline(h = 4*mean(cooksd, na.rm = T), col = "red")
+```
+
+# Clean outliers
+
+```{r}
+clean_outliers = as.numeric(rownames(data_quakes[cooksd > 4 * mean(cooksd, na.rm=T), ]))
+outliers = c(outliers , clean_outliers[ !clean_outliers %in% outliers ] )
+
+clean_Data = data_quakes[-outliers, ]
+summary(clean_Data)
+str(clean_Data)
+```
+
+
+
+# Histogram plot after remove outliers
+
+```{r}
+par(mfrow=c(3,2))
+for ( i in 1:5) {
+  truehist(clean_Data[[i]], xlab = names(clean_Data)[i], col = 'lightgreen', main = paste("Average =", signif(mean(clean_Data[[i]]),3)))
+}
+```
+
+By removing the outliers, the dataset size reduced to 708 observations of 5 variables. Now, the variables are approximatly normaly distributed. By comparing with the previous histogram that contains high influency outliers we can see that the skewness is reduced in the new histogram.
+
+
+# 2.1  Model building
+
+### Now we fit a simple linear regression model to predict earthquake magnitude based on earthquake depth.
+
+$$mag=\beta0+\beta1.depth$$
+
+```{r}
+lmmod<- lm(mag~depth, data = clean_Data)
+summary(lmmod)
+anova(lmmod)
+```
+
+# Adjusted R^2= 0.02634  , RSE= 0.3311 so the model is not good fit.
+
+# 2.1 To check for non constant variance
+
+ANOVA for reduced model 
+
+```{r}
+red<- resid(lmmod)
+rs<- red^2
+red.lm<- lm(rs~depth, data = clean_Data[1:708,])
+summary(red.lm)
+anova(red.lm)
+```
+
+# Breush-Pagan test for constancy of error variance
+
+$$\chi_0=\frac{n^2}{2}*\frac{SSR^*}{SSE^2}$$
+From above anova table and summary we have n = 708, SSR = 14.500, SSE* = 77.395
+
+```{r}
+chi0 <-((708^2)/2) * (14.500/(77.395^2))
+chi0
+chi_crit <- qchisq(0.95,706)
+chi_crit
+```
+
+# Hypothesis(null and alternative):
+
+H0:beta1=0 and H1:beta1!=0
+
+Since the chi0 = 606.7066<chi_crit=768.924 so we can reject null hypothesis.
+
+
+
+# Plot for full model without outliers in the dataset to predict magnitude based on depth
+
+```{r}
+par(mfrow=c(2,3))
+plot(lmmod)
+```
+
+# Based on the above graphs, we observe the following -
+
+- Residual vs fitted: There is curvature in the plot indicating that there is non linear relationship in the datasets.
+
+- The normal Q-Q plot shows a fairly straight line, indicating the errors are more-or-less normally distributed.
+
+# Based on the above summary of the fitted model we make the following observations:
+
+- The multiple R- squared of the full and reduced model is 0.02771 and 1.183e-05. Adjusted R-square value is 0.02634  and -0.001405  respectively for full and reduced model.
+
+- Since the errors seem to follow normal distribution based on Q-Q plot so taking level of significance 0.01.
+
+
+# Identify multicolinearity of with.
+
+Now we look for the deeper analysis of the data
+
+```{r}
+pairs(mag~depth,data = clean_Data[1:708,])
+```
+
+# With all variables
+
+```{r}
+pairs(mag~.,data = clean_Data[1:708,])
+```
+
+# Multicollinearity occurs when the features (or independent variables) are highly correlated
+
+# Linearity
+
+```{r}
+plot(clean_Data$mag,clean_Data$residuals,xlab="mag",ylab="Residuals",main="Linearity")
+```
+
+# from the scatterplot we can see that the relationship between response and feature variables is linear.
+
+### Further analysis
+
+# Multiple Linear Regression
+
+Now, we fit a multiple linear regression model with mag as the response and all other variables as regressors. We plot the basic summary plots based on the fitted model, lmmod1, say, to get more idea about the data
+
+```{r}
+lmmod1<-lm(mag~.,data=clean_Data[1:708,])
+summary(lmmod1)
+anova(lmmod1)
+```
+
+# Adjusted R^2 = 0.732, RSE = 0.1737
+# 2.2 Check for non constant variance
+
+ANOVA for reduced model
+
+```{r}
+red<- resid(lmmod1)
+rs<- red^2
+red.lm<- lm(rs~ lat+long+depth+stations, data = clean_Data[1:708,])
+summary(red.lm)
+anova(red.lm)
+```
+
+# Breush-Pagan test for constancy of error variance
+
+$$\chi_0=\frac{n^2}{2}*\frac{SSR^*}{SSE^2}$$
+From above anova table and summary we have n = 708, SSR = 1.03394, SSE* = 21.215
+
+```{r}
+chi0 <-((708^2)/2) * (1.03394/(21.215^2))
+chi0
+chi_crit <- qchisq(0.95,703)
+chi_crit
+```
+
+# Hypothesis(null and alternative):
+
+H0:beta1=0 and H1:beta1!=0
+
+Since the chi0 = 575.7657<chi_crit=765.7925 so we can reject null hypothesis.
+
+# Plot for full model without outliers
+
+```{r}
+par(mfrow=c(2,3))
+plot(lmmod1)
+```
+
+
+# Based on the above graphs, we observe the following -
+
+- Residual vs fitted: There is curvature in the plot indicating that there is non linear relationship in the datasets.
+
+- The normal Q-Q plot shows a fairly straight line, indicating the errors are more-or-less normally distributed.
+
+# Based on the above summary of the fitted model we make the following observations:
+
+- The multiple R- squared of the full and reduced model is 0.7335 and 0.001375. Adjusted R-square value is 0.732 and -0.004307 respectively for full and reduced model.
+
+- Since the errors seem to follow normal distribution based on Q-Q plot so taking level of significance 0.01.
+
+
+
+# 3. Model Selection
+
+In this section we will develop a best subset model for predicting the Earthquakes.
+
+```{r}
+lm.1<- lm(mag~.,clean_Data)
+lm.1
+plt<- ols_step_best_subset(lm.1)
+plt
+plot(plt)
+```
+
+We can see that model 4 with lat, long, depth, stations  as predictor variables is selected based on R^2 adjusted  criterion with highest R^2 adjusted value. C(p) value leads to model 4 as for this model which is small. This 4 predictor variable model is also selected by the AIC. We can see SBC criterion which leads to model 4. Based on the 4 criteria model 4 turned out to be the best model.
+
+
+# 4. Summary
+
+In this project I have predicted earthquake magnitude based on earthquake depth. For this I have collected data with 1000 observations of 5 variables and all the values in the data sets are numeric. 
+
+In the preliminary analysis part of the project I analyzed data with various method. A few approaches were taken to addressed the analysis of the data. Box plot shows the outliers of the data and then for better analysis I plotted histrogram. It shows there more than 200 outliers on the datasets. I checked for influence of the outliers by cooks distance and clean the outliers. 
+
+After that I fitted a model with magnitude and depth which is a simple linear regression model. By the assumptions of linear regression i checked for multicolinearity, linearity of the variables.  From the scatter plot of multicolinearity and linearity its visible that the data in linear and normally distributed. 
+
+For the further analysis I was fitted a model with earthquake magnitude based on other variables.
+
+The diagnostic plots show an improvement over the base one. However, the performance of the model decreases as showcased by smaller R-squared and RMSE values for both methods.
+
+In the last section the best models shows that with lat, long, depth and stations
+
+
